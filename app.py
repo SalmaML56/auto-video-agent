@@ -7,63 +7,32 @@ import numpy as np
 import tempfile
 import uuid
 import platform
-import re
-from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip
-from moviepy.config import change_settings
+from moviepy.editor import VideoFileClip, VideoClip, CompositeVideoClip
+from PIL import Image, ImageDraw, ImageFont
 
-# --- [1. SABSE PEHLE: IMAGE MAGICK ERROR FIX] ---
-def solve_imagemagick_error():
-    """Linux server par security policy bypass karne ke liye"""
-    if platform.system() != "Windows":
-        try:
-            # Policy file ki locations check karna
-            for path in ["/etc/ImageMagick-6/policy.xml", "/etc/ImageMagick-7/policy.xml"]:
-                if os.path.exists(path):
-                    with open(path, 'r') as f:
-                        data = f.read()
-                    
-                    # Security restriction ko khatam karna
-                    new_data = re.sub(r'rights="none"\s+pattern="@\*"', 'rights="read|write" pattern="@*"', data)
-                    
-                    # Nayi policy file ko temporary folder mein save karna
-                    tmp_dir = tempfile.gettempdir()
-                    new_policy_path = os.path.join(tmp_dir, "policy.xml")
-                    with open(new_policy_path, 'w') as f:
-                        f.write(new_data)
-                    
-                    # System ko batana ke naya policy folder check kare
-                    os.environ["MAGICK_CONFIGURE_PATH"] = tmp_dir
-                    break
-        except Exception:
-            pass
-
-solve_imagemagick_error()
-
-# --- [2. PATH CONFIGURATION] ---
-if platform.system() == "Windows":
-    # PC ke liye
-    change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
-else:
-    # Cloud Server ke liye
-    change_settings({"IMAGEMAGICK_BINARY": "/usr/bin/convert"})
-
-# --- [3. UI DESIGN - WAHI PURANA PYERA LOOK] ---
+# --- [1. UI DESIGN - WAHI ORIGINAL BLUE LOOK] ---
 st.set_page_config(page_title="Professional AI Video Editor", layout="wide")
 
 st.markdown("""
     <style>
-    /* Dark Theme */
     .stApp { background-color: #000000; }
     h1, h2, h3, h4, p, span, label, .stMarkdown { color: #ffffff !important; }
     
-    /* File Uploader Style */
+    /* File Uploader Design */
     .stFileUploader section { 
         background-color: #0a0a0a !important; 
         border: 2px dashed #1e1e1e !important; 
         border-radius: 15px; 
     }
     
-    /* Blue Gradient Buttons - Wahi original design */
+    /* Browse Files Button Fix (Ab white nahi hoga) */
+    section[data-testid="stFileUploader"] button {
+        background-color: #007BFF !important;
+        color: white !important;
+        border-radius: 8px !important;
+    }
+
+    /* Main Blue Gradient Buttons */
     .stButton>button, .stDownloadButton>button {
         width: 100%; 
         border-radius: 12px; 
@@ -72,14 +41,36 @@ st.markdown("""
         color: #ffffff !important; 
         font-weight: bold !important; 
         border: none !important;
-        box-shadow: 0px 4px 15px rgba(0, 123, 255, 0.3);
-    }
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0px 6px 20px rgba(0, 123, 255, 0.4);
+        box-shadow: 0px 4px 15px rgba(0, 123, 255, 0.4);
     }
     </style>
     """, unsafe_allow_html=True)
+
+# --- [2. HELPER FUNCTIONS FOR CAPTIONS (Using PIL instead of ImageMagick)] ---
+def make_text_frame(text, size, color, font_size=80):
+    """Pillow use karke caption image banana taaki ImageMagick error na aaye"""
+    img = Image.new('RGBA', size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    
+    # Linux server par default font path
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+    except:
+        font = ImageFont.load_default()
+
+    # Text alignment
+    w, h = draw.textbbox((0, 0), text, font=font)[2:]
+    x = (size[0] - w) // 2
+    y = (size[1] - h) // 2
+    
+    # Black Stroke (Outline)
+    for offset in [-3, 0, 3]:
+        for offset_y in [-3, 0, 3]:
+            draw.text((x+offset, y+offset_y), text, font=font, fill="black")
+    
+    # Main Text
+    draw.text((x, y), text, font=font, fill=color)
+    return np.array(img)
 
 @st.cache_resource
 def load_whisper_model():
@@ -105,14 +96,14 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
             W_target, H_target = 1080, 1920
             target_crop_w = int(H_orig * (9/16))
             
-            status_container.info("Step 1: AI is listening to your video...")
+            status_container.info("Step 1: AI is transcribing audio...")
             if clip.audio:
                 clip.audio.write_audiofile(temp_audio_path, logger=None)
                 result = whisper_model.transcribe(temp_audio_path, language=target_lang)
                 segments = result['segments']
             else: segments = []
 
-            status_container.info("Step 2: Tracking faces & Reframing to Portrait...")
+            status_container.info("Step 2: Tracking Face & Reframing...")
             face_buffer = collections.deque(maxlen=25)
 
             def frame_processor(get_frame, t):
@@ -128,31 +119,30 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
 
             portrait_video = clip.fl(frame_processor)
 
-            status_container.info("Step 3: Burning Colorful Captions...")
+            status_container.info("Step 3: Creating Captions (Secure Mode)...")
             caption_clips = []
             for s in segments:
-                # Ghostscript friendly font use kar rahe hain
-                txt = TextClip(
-                    s['text'].strip().upper(),
-                    fontsize=80, color=caption_color, font='DejaVu-Sans-Bold',
-                    stroke_color='black', stroke_width=2,
-                    method='caption', size=(W_target * 0.85, None)
-                ).set_start(s['start']).set_duration(s['end'] - s['start']).set_position(('center', H_target * 0.75))
-                caption_clips.append(txt)
+                txt_str = s['text'].strip().upper()
+                duration = s['end'] - s['start']
+                if duration <= 0: continue
+                
+                # Pillow based clip
+                txt_img = make_text_frame(txt_str, (W_target, 400), caption_color)
+                txt_clip = VideoClip(lambda t: txt_img, duration=duration).set_start(s['start']).set_position(('center', H_target * 0.75))
+                caption_clips.append(txt_clip)
 
             final_video = CompositeVideoClip([portrait_video] + caption_clips, size=(W_target, H_target))
             final_video.write_videofile(output_path, codec="libx264", audio_codec="aac", fps=24, logger=None)
             
             final_video.close()
             portrait_video.close()
-            for c in caption_clips: c.close()
     finally:
         if os.path.exists(temp_audio_path):
             try: os.remove(temp_audio_path)
             except: pass
 
 # --- [APP LAYOUT] ---
-st.markdown("<div style='text-align: center; padding: 20px;'><h1>🎬 AI AUTO-SHORTS EDITOR</h1></div>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>🎬 AI AUTO-SHORTS EDITOR</h1>", unsafe_allow_html=True)
 st.divider()
 
 col_left, col_right = st.columns([1, 1], gap="large")
