@@ -11,50 +11,45 @@ import re
 from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip
 from moviepy.config import change_settings
 
-# --- 0. POWERFUL IMAGE MAGICK POLICY FIX ---
+# --- [SECURITY FIX] ImageMagick Policy Bypass ---
 def patch_magick_policy():
-    """Linux server ki security policy ko bypass karne ke liye"""
     if platform.system() != "Windows":
         try:
-            # System ki asli policy file dhoondna
             orig_policy = "/etc/ImageMagick-6/policy.xml"
             if os.path.exists(orig_policy):
                 with open(orig_policy, 'r') as f:
                     data = f.read()
-                
-                # Security restriction ko khatam karna
                 new_data = re.sub(r'rights="none"\s+pattern="@\*"', 'rights="read|write" pattern="@*"', data)
-                
-                # Nayi policy file ko /tmp mein save karna
                 tmp_dir = tempfile.gettempdir()
                 policy_path = os.path.join(tmp_dir, "policy.xml")
                 with open(policy_path, 'w') as f:
                     f.write(new_data)
-                
-                # System ko batana ke naya policy file istemal kare
                 os.environ["MAGICK_CONFIGURE_PATH"] = tmp_dir
-                print("ImageMagick Policy Patched Successfully")
         except Exception as e:
-            print(f"Policy Patch Failed: {e}")
+            pass
 
-# Apply the patch
 patch_magick_policy()
 
-# --- 1. CONFIGURATION ---
+# --- [PATH CONFIG] ---
 if platform.system() == "Windows":
     change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
 else:
     change_settings({"IMAGEMAGICK_BINARY": "/usr/bin/convert"})
 
-st.set_page_config(page_title="AI Video Editor Pro", layout="wide")
+# --- [UI DESIGN] ---
+st.set_page_config(page_title="Professional AI Video Editor", layout="wide")
 
-# Custom CSS for Dark Theme
+# Wahi Purana Pyera Dark Theme CSS
 st.markdown("""
     <style>
     .stApp { background-color: #000000; }
     h1, h2, h3, h4, p, span, label, .stMarkdown { color: #ffffff !important; }
-    .stFileUploader section { background-color: #111111 !important; border: 2px dashed #333 !important; }
-    .stButton>button { background: linear-gradient(135deg, #007BFF 0%, #0056b3 100%) !important; color: white !important; }
+    .stFileUploader section { background-color: #0a0a0a !important; border: 2px solid #1e1e1e !important; border-radius: 15px; }
+    .stButton>button, .stDownloadButton>button {
+        width: 100%; border-radius: 12px; height: 3.8em;
+        background: linear-gradient(135deg, #007BFF 0%, #0056b3 100%) !important;
+        color: #ffffff !important; font-weight: bold !important; border: none !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -82,17 +77,15 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
             W_target, H_target = 1080, 1920
             target_crop_w = int(H_orig * (9/16))
             
-            # 1. Audio & Transcription
-            status_container.info("Transcribing Audio...")
+            status_container.markdown("#### Status: Transcribing Audio...")
             if clip.audio:
                 clip.audio.write_audiofile(temp_audio_path, logger=None)
                 result = whisper_model.transcribe(temp_audio_path, language=target_lang)
                 segments = result['segments']
             else: segments = []
 
-            # 2. Reframing
-            status_container.info("Tracking Face & Reframing...")
-            face_buffer = collections.deque(maxlen=20)
+            status_container.markdown("#### Status: Tracking Face and Reframing...")
+            face_buffer = collections.deque(maxlen=25)
 
             def frame_processor(get_frame, t):
                 frame = get_frame(t)
@@ -107,19 +100,17 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
 
             portrait_video = clip.fl(frame_processor)
 
-            # 3. Captions
-            status_container.info("Burning Captions...")
+            status_container.markdown("#### Status: Burning Captions...")
             caption_clips = []
             for s in segments:
                 txt = TextClip(
                     s['text'].strip().upper(),
-                    fontsize=75, color=caption_color, font='DejaVu-Sans-Bold',
-                    stroke_color='black', stroke_width=2,
-                    method='caption', size=(W_target * 0.8, None)
+                    fontsize=85, color=caption_color, font='DejaVu-Sans-Bold',
+                    stroke_color='black', stroke_width=2.5,
+                    method='caption', size=(W_target * 0.9, None)
                 ).set_start(s['start']).set_duration(s['end'] - s['start']).set_position(('center', H_target * 0.75))
                 caption_clips.append(txt)
 
-            # 4. Final Export
             final_video = CompositeVideoClip([portrait_video] + caption_clips, size=(W_target, H_target))
             final_video.write_videofile(output_path, codec="libx264", audio_codec="aac", fps=24, logger=None)
             
@@ -131,31 +122,36 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
             try: os.remove(temp_audio_path)
             except: pass
 
-# --- UI ---
-st.title("🎬 AI Auto-Shorts Editor")
-st.write("Upload a landscape video and let AI convert it to a viral portrait short.")
+# --- [APP LAYOUT] ---
+st.markdown("<div style='text-align: center; padding: 20px;'><h1>AI AUTO-SHORTS EDITOR</h1></div>", unsafe_allow_html=True)
+st.divider()
 
-video_file = st.file_uploader("Upload Video", type=["mp4", "mov", "avi"])
+col_left, col_right = st.columns([1, 1], gap="large")
 
-if video_file:
-    col1, col2 = st.columns(2)
-    with col1:
-        st.video(video_file)
-    with col2:
-        lang = st.selectbox("Language", ["en", "ur", "hi", "ar"])
-        color = st.color_picker("Caption Color", "#FFFF00")
-        
-        if st.button("Generate Short"):
-            status = st.empty()
+with col_left:
+    st.markdown("### Video Input")
+    video_file = st.file_uploader("Upload your footage", type=["mp4", "mov", "avi"])
+    if video_file: st.video(video_file)
+
+with col_right:
+    st.markdown("### Configurations")
+    # Wahi purana language style
+    lang_selection = st.selectbox("Speech Language", ["English (en)", "Urdu (ur)", "Hindi (hi)", "Arabic (ar)"])
+    lang_code = lang_selection.split('(')[1].strip(')')
+    cap_color = st.color_picker("Caption Color", "#FFFF00")
+    
+    if video_file is not None:
+        if st.button("START TRANSFORMATION"):
+            status_area = st.empty()
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_in:
                 tmp_in.write(video_file.read())
                 tmp_in_path = tmp_in.name
 
-            output_name = f"Short_{uuid.uuid4().hex[:6]}.mp4"
+            output_file_name = f"Short_{uuid.uuid4().hex[:6]}.mp4"
             try:
-                process_video_pipeline(tmp_in_path, output_name, lang, color, status)
-                st.success("Success!")
-                with open(output_name, "rb") as f:
-                    st.download_button("Download Short", f, file_name=output_name)
-            except Exception as e:
-                st.error(f"Error: {e}")
+                process_video_pipeline(tmp_in_path, output_file_name, lang_code, cap_color, status_area)
+                st.success("Conversion Complete")
+                with open(output_file_name, "rb") as f:
+                    st.download_button(label="DOWNLOAD FINAL SHORT", data=f, file_name=output_file_name, mime="video/mp4")
+                os.remove(tmp_in_path)
+            except Exception as e: st.error(f"Error: {e}")
