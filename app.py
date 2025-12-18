@@ -11,44 +11,72 @@ import re
 from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip
 from moviepy.config import change_settings
 
-# --- [SECURITY FIX] ImageMagick Policy Bypass ---
-def patch_magick_policy():
+# --- [1. SABSE PEHLE: IMAGE MAGICK ERROR FIX] ---
+def solve_imagemagick_error():
+    """Linux server par security policy bypass karne ke liye"""
     if platform.system() != "Windows":
         try:
-            orig_policy = "/etc/ImageMagick-6/policy.xml"
-            if os.path.exists(orig_policy):
-                with open(orig_policy, 'r') as f:
-                    data = f.read()
-                new_data = re.sub(r'rights="none"\s+pattern="@\*"', 'rights="read|write" pattern="@*"', data)
-                tmp_dir = tempfile.gettempdir()
-                policy_path = os.path.join(tmp_dir, "policy.xml")
-                with open(policy_path, 'w') as f:
-                    f.write(new_data)
-                os.environ["MAGICK_CONFIGURE_PATH"] = tmp_dir
-        except Exception as e:
+            # Policy file ki locations check karna
+            for path in ["/etc/ImageMagick-6/policy.xml", "/etc/ImageMagick-7/policy.xml"]:
+                if os.path.exists(path):
+                    with open(path, 'r') as f:
+                        data = f.read()
+                    
+                    # Security restriction ko khatam karna
+                    new_data = re.sub(r'rights="none"\s+pattern="@\*"', 'rights="read|write" pattern="@*"', data)
+                    
+                    # Nayi policy file ko temporary folder mein save karna
+                    tmp_dir = tempfile.gettempdir()
+                    new_policy_path = os.path.join(tmp_dir, "policy.xml")
+                    with open(new_policy_path, 'w') as f:
+                        f.write(new_data)
+                    
+                    # System ko batana ke naya policy folder check kare
+                    os.environ["MAGICK_CONFIGURE_PATH"] = tmp_dir
+                    break
+        except Exception:
             pass
 
-patch_magick_policy()
+solve_imagemagick_error()
 
-# --- [PATH CONFIG] ---
+# --- [2. PATH CONFIGURATION] ---
 if platform.system() == "Windows":
+    # PC ke liye
     change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.2-Q16-HDRI\magick.exe"})
 else:
+    # Cloud Server ke liye
     change_settings({"IMAGEMAGICK_BINARY": "/usr/bin/convert"})
 
-# --- [UI DESIGN] ---
+# --- [3. UI DESIGN - WAHI PURANA PYERA LOOK] ---
 st.set_page_config(page_title="Professional AI Video Editor", layout="wide")
 
-# Wahi Purana Pyera Dark Theme CSS
 st.markdown("""
     <style>
+    /* Dark Theme */
     .stApp { background-color: #000000; }
     h1, h2, h3, h4, p, span, label, .stMarkdown { color: #ffffff !important; }
-    .stFileUploader section { background-color: #0a0a0a !important; border: 2px solid #1e1e1e !important; border-radius: 15px; }
+    
+    /* File Uploader Style */
+    .stFileUploader section { 
+        background-color: #0a0a0a !important; 
+        border: 2px dashed #1e1e1e !important; 
+        border-radius: 15px; 
+    }
+    
+    /* Blue Gradient Buttons - Wahi original design */
     .stButton>button, .stDownloadButton>button {
-        width: 100%; border-radius: 12px; height: 3.8em;
+        width: 100%; 
+        border-radius: 12px; 
+        height: 3.8em;
         background: linear-gradient(135deg, #007BFF 0%, #0056b3 100%) !important;
-        color: #ffffff !important; font-weight: bold !important; border: none !important;
+        color: #ffffff !important; 
+        font-weight: bold !important; 
+        border: none !important;
+        box-shadow: 0px 4px 15px rgba(0, 123, 255, 0.3);
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0px 6px 20px rgba(0, 123, 255, 0.4);
     }
     </style>
     """, unsafe_allow_html=True)
@@ -77,14 +105,14 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
             W_target, H_target = 1080, 1920
             target_crop_w = int(H_orig * (9/16))
             
-            status_container.markdown("#### Status: Transcribing Audio...")
+            status_container.info("Step 1: AI is listening to your video...")
             if clip.audio:
                 clip.audio.write_audiofile(temp_audio_path, logger=None)
                 result = whisper_model.transcribe(temp_audio_path, language=target_lang)
                 segments = result['segments']
             else: segments = []
 
-            status_container.markdown("#### Status: Tracking Face and Reframing...")
+            status_container.info("Step 2: Tracking faces & Reframing to Portrait...")
             face_buffer = collections.deque(maxlen=25)
 
             def frame_processor(get_frame, t):
@@ -100,14 +128,15 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
 
             portrait_video = clip.fl(frame_processor)
 
-            status_container.markdown("#### Status: Burning Captions...")
+            status_container.info("Step 3: Burning Colorful Captions...")
             caption_clips = []
             for s in segments:
+                # Ghostscript friendly font use kar rahe hain
                 txt = TextClip(
                     s['text'].strip().upper(),
-                    fontsize=85, color=caption_color, font='DejaVu-Sans-Bold',
-                    stroke_color='black', stroke_width=2.5,
-                    method='caption', size=(W_target * 0.9, None)
+                    fontsize=80, color=caption_color, font='DejaVu-Sans-Bold',
+                    stroke_color='black', stroke_width=2,
+                    method='caption', size=(W_target * 0.85, None)
                 ).set_start(s['start']).set_duration(s['end'] - s['start']).set_position(('center', H_target * 0.75))
                 caption_clips.append(txt)
 
@@ -123,25 +152,24 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
             except: pass
 
 # --- [APP LAYOUT] ---
-st.markdown("<div style='text-align: center; padding: 20px;'><h1>AI AUTO-SHORTS EDITOR</h1></div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align: center; padding: 20px;'><h1>🎬 AI AUTO-SHORTS EDITOR</h1></div>", unsafe_allow_html=True)
 st.divider()
 
 col_left, col_right = st.columns([1, 1], gap="large")
 
 with col_left:
-    st.markdown("### Video Input")
-    video_file = st.file_uploader("Upload your footage", type=["mp4", "mov", "avi"])
+    st.markdown("### 📥 Video Input")
+    video_file = st.file_uploader("Upload your video here", type=["mp4", "mov", "avi"])
     if video_file: st.video(video_file)
 
 with col_right:
-    st.markdown("### Configurations")
-    # Wahi purana language style
+    st.markdown("### ⚙️ Configurations")
     lang_selection = st.selectbox("Speech Language", ["English (en)", "Urdu (ur)", "Hindi (hi)", "Arabic (ar)"])
     lang_code = lang_selection.split('(')[1].strip(')')
     cap_color = st.color_picker("Caption Color", "#FFFF00")
     
     if video_file is not None:
-        if st.button("START TRANSFORMATION"):
+        if st.button("🚀 START TRANSFORMATION"):
             status_area = st.empty()
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_in:
                 tmp_in.write(video_file.read())
@@ -150,8 +178,9 @@ with col_right:
             output_file_name = f"Short_{uuid.uuid4().hex[:6]}.mp4"
             try:
                 process_video_pipeline(tmp_in_path, output_file_name, lang_code, cap_color, status_area)
-                st.success("Conversion Complete")
+                st.success("✨ Conversion Complete!")
                 with open(output_file_name, "rb") as f:
-                    st.download_button(label="DOWNLOAD FINAL SHORT", data=f, file_name=output_file_name, mime="video/mp4")
+                    st.download_button(label="📥 DOWNLOAD FINAL SHORT", data=f, file_name=output_file_name, mime="video/mp4")
                 os.remove(tmp_in_path)
-            except Exception as e: st.error(f"Error: {e}")
+            except Exception as e: 
+                st.error(f"Error: {e}")
