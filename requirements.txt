@@ -1,5 +1,6 @@
 streamlit
-moviepy==1.0.3
+moviepy
 openai-whisper
 opencv-python-headless
 numpy<2.0.0
+Pillow
