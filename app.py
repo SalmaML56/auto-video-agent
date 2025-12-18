@@ -10,29 +10,32 @@ import platform
 from moviepy.editor import VideoFileClip, VideoClip, CompositeVideoClip
 from PIL import Image, ImageDraw, ImageFont
 
-# --- [1. UI DESIGN - WAHI ORIGINAL BLUE LOOK] ---
+# --- [1. DESIGN & CSS - WAHI ORIGINAL BLUE LOOK] ---
 st.set_page_config(page_title="Professional AI Video Editor", layout="wide")
 
 st.markdown("""
     <style>
+    /* Dark Background */
     .stApp { background-color: #000000; }
     h1, h2, h3, h4, p, span, label, .stMarkdown { color: #ffffff !important; }
     
-    /* File Uploader Design */
+    /* File Uploader Container */
     .stFileUploader section { 
         background-color: #0a0a0a !important; 
         border: 2px dashed #1e1e1e !important; 
         border-radius: 15px; 
     }
     
-    /* Browse Files Button Fix (Ab white nahi hoga) */
-    section[data-testid="stFileUploader"] button {
+    /* FIX: Browse Files Button (Ab white nahi, Blue hoga) */
+    div[data-testid="stFileUploader"] button {
         background-color: #007BFF !important;
         color: white !important;
-        border-radius: 8px !important;
+        border: none !important;
+        border-radius: 10px !important;
+        padding: 0.5rem 1rem !important;
     }
 
-    /* Main Blue Gradient Buttons */
+    /* Professional Blue Gradient Buttons */
     .stButton>button, .stDownloadButton>button {
         width: 100%; 
         border-radius: 12px; 
@@ -43,32 +46,36 @@ st.markdown("""
         border: none !important;
         box-shadow: 0px 4px 15px rgba(0, 123, 255, 0.4);
     }
+    .stButton>button:hover {
+        transform: scale(1.01);
+        box-shadow: 0px 6px 20px rgba(0, 123, 255, 0.6);
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- [2. HELPER FUNCTIONS FOR CAPTIONS (Using PIL instead of ImageMagick)] ---
-def make_text_frame(text, size, color, font_size=80):
-    """Pillow use karke caption image banana taaki ImageMagick error na aaye"""
+# --- [2. SECURE CAPTION MAKER (No ImageMagick Needed)] ---
+def make_text_frame(text, size, color):
+    # Transparent background image
     img = Image.new('RGBA', size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     
-    # Linux server par default font path
+    # Font Selection
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 75)
     except:
         font = ImageFont.load_default()
 
-    # Text alignment
+    # Calculate text position
     w, h = draw.textbbox((0, 0), text, font=font)[2:]
     x = (size[0] - w) // 2
     y = (size[1] - h) // 2
     
-    # Black Stroke (Outline)
-    for offset in [-3, 0, 3]:
-        for offset_y in [-3, 0, 3]:
-            draw.text((x+offset, y+offset_y), text, font=font, fill="black")
+    # Draw Outline (Stroke)
+    for o in [-2, 2]:
+        for oy in [-2, 2]:
+            draw.text((x+o, y+oy), text, font=font, fill="black")
     
-    # Main Text
+    # Draw Main Text
     draw.text((x, y), text, font=font, fill=color)
     return np.array(img)
 
@@ -96,7 +103,7 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
             W_target, H_target = 1080, 1920
             target_crop_w = int(H_orig * (9/16))
             
-            status_container.info("Step 1: AI is transcribing audio...")
+            status_container.info("Step 1: AI Listening to Audio...")
             if clip.audio:
                 clip.audio.write_audiofile(temp_audio_path, logger=None)
                 result = whisper_model.transcribe(temp_audio_path, language=target_lang)
@@ -119,15 +126,15 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
 
             portrait_video = clip.fl(frame_processor)
 
-            status_container.info("Step 3: Creating Captions (Secure Mode)...")
+            status_container.info("Step 3: Creating Secure Captions...")
             caption_clips = []
             for s in segments:
                 txt_str = s['text'].strip().upper()
                 duration = s['end'] - s['start']
                 if duration <= 0: continue
                 
-                # Pillow based clip
-                txt_img = make_text_frame(txt_str, (W_target, 400), caption_color)
+                # Image-based secure clip
+                txt_img = make_text_frame(txt_str, (W_target, 300), caption_color)
                 txt_clip = VideoClip(lambda t: txt_img, duration=duration).set_start(s['start']).set_position(('center', H_target * 0.75))
                 caption_clips.append(txt_clip)
 
@@ -141,7 +148,7 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
             try: os.remove(temp_audio_path)
             except: pass
 
-# --- [APP LAYOUT] ---
+# --- [3. APP LAYOUT] ---
 st.markdown("<h1 style='text-align: center;'>🎬 AI AUTO-SHORTS EDITOR</h1>", unsafe_allow_html=True)
 st.divider()
 
@@ -149,7 +156,7 @@ col_left, col_right = st.columns([1, 1], gap="large")
 
 with col_left:
     st.markdown("### 📥 Video Input")
-    video_file = st.file_uploader("Upload your video here", type=["mp4", "mov", "avi"])
+    video_file = st.file_uploader("Upload your footage", type=["mp4", "mov", "avi"])
     if video_file: st.video(video_file)
 
 with col_right:
@@ -165,12 +172,12 @@ with col_right:
                 tmp_in.write(video_file.read())
                 tmp_in_path = tmp_in.name
 
-            output_file_name = f"Short_{uuid.uuid4().hex[:6]}.mp4"
+            output_name = f"Short_{uuid.uuid4().hex[:6]}.mp4"
             try:
-                process_video_pipeline(tmp_in_path, output_file_name, lang_code, cap_color, status_area)
-                st.success("✨ Conversion Complete!")
-                with open(output_file_name, "rb") as f:
-                    st.download_button(label="📥 DOWNLOAD FINAL SHORT", data=f, file_name=output_file_name, mime="video/mp4")
+                process_video_pipeline(tmp_in_path, output_name, lang_code, cap_color, status_area)
+                st.success("✨ Success! Video is Ready.")
+                with open(output_name, "rb") as f:
+                    st.download_button(label="📥 DOWNLOAD FINAL SHORT", data=f, file_name=output_name, mime="video/mp4")
                 os.remove(tmp_in_path)
             except Exception as e: 
                 st.error(f"Error: {e}")
