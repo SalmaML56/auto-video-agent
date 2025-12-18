@@ -6,76 +6,81 @@ import collections
 import numpy as np
 import tempfile
 import uuid
-import platform
-from moviepy.editor import VideoFileClip, VideoClip, CompositeVideoClip
+from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
 from PIL import Image, ImageDraw, ImageFont
 
-# --- [1. DESIGN & CSS - WAHI ORIGINAL BLUE LOOK] ---
-st.set_page_config(page_title="Professional AI Video Editor", layout="wide")
+# --- [1. PROFESSIONAL DESIGN & CSS] ---
+st.set_page_config(page_title="AI Video Editor Pro", layout="wide")
 
 st.markdown("""
     <style>
-    /* Dark Background */
+    /* Dark Theme Base */
     .stApp { background-color: #000000; }
-    h1, h2, h3, h4, p, span, label, .stMarkdown { color: #ffffff !important; }
+    h1, h2, h3, h4, p, span, label, .stMarkdown { color: #ffffff !important; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     
+    /* Description Styling */
+    .description-text {
+        text-align: center;
+        color: #bbbbbb !important;
+        font-size: 1.1rem;
+        margin-bottom: 2rem;
+    }
+
     /* File Uploader Container */
     .stFileUploader section { 
         background-color: #0a0a0a !important; 
-        border: 2px dashed #1e1e1e !important; 
-        border-radius: 15px; 
+        border: 1px solid #1e1e1e !important; 
+        border-radius: 12px; 
     }
     
-    /* FIX: Browse Files Button (Ab white nahi, Blue hoga) */
+    /* Professional Blue Button for File Uploader */
     div[data-testid="stFileUploader"] button {
         background-color: #007BFF !important;
         color: white !important;
         border: none !important;
-        border-radius: 10px !important;
-        padding: 0.5rem 1rem !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
     }
 
-    /* Professional Blue Gradient Buttons */
+    /* Gradient Primary Buttons */
     .stButton>button, .stDownloadButton>button {
         width: 100%; 
-        border-radius: 12px; 
-        height: 3.8em;
+        border-radius: 10px; 
+        height: 3.5em;
         background: linear-gradient(135deg, #007BFF 0%, #0056b3 100%) !important;
         color: #ffffff !important; 
         font-weight: bold !important; 
         border: none !important;
-        box-shadow: 0px 4px 15px rgba(0, 123, 255, 0.4);
+        letter-spacing: 0.5px;
     }
+    
     .stButton>button:hover {
-        transform: scale(1.01);
-        box-shadow: 0px 6px 20px rgba(0, 123, 255, 0.6);
+        border: 1px solid #007BFF !important;
+        color: #ffffff !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- [2. SECURE CAPTION MAKER (No ImageMagick Needed)] ---
-def make_text_frame(text, size, color):
-    # Transparent background image
+# --- [2. CORE LOGIC - NO IMAGE MAGICK] ---
+def make_text_frame_image(text, size, color):
+    # Creating RGBA image for clean transparency
     img = Image.new('RGBA', size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     
-    # Font Selection
     try:
         font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 75)
     except:
         font = ImageFont.load_default()
 
-    # Calculate text position
     w, h = draw.textbbox((0, 0), text, font=font)[2:]
     x = (size[0] - w) // 2
     y = (size[1] - h) // 2
     
-    # Draw Outline (Stroke)
-    for o in [-2, 2]:
-        for oy in [-2, 2]:
+    # Clean Black Stroke
+    for o in [-3, 3]:
+        for oy in [-3, 3]:
             draw.text((x+o, y+oy), text, font=font, fill="black")
     
-    # Draw Main Text
     draw.text((x, y), text, font=font, fill=color)
     return np.array(img)
 
@@ -103,14 +108,14 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
             W_target, H_target = 1080, 1920
             target_crop_w = int(H_orig * (9/16))
             
-            status_container.info("Step 1: AI Listening to Audio...")
+            status_container.info("Status: Transcribing audio content...")
             if clip.audio:
                 clip.audio.write_audiofile(temp_audio_path, logger=None)
                 result = whisper_model.transcribe(temp_audio_path, language=target_lang)
                 segments = result['segments']
             else: segments = []
 
-            status_container.info("Step 2: Tracking Face & Reframing...")
+            status_container.info("Status: Applying face tracking and reframing...")
             face_buffer = collections.deque(maxlen=25)
 
             def frame_processor(get_frame, t):
@@ -126,16 +131,16 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
 
             portrait_video = clip.fl(frame_processor)
 
-            status_container.info("Step 3: Creating Secure Captions...")
+            status_container.info("Status: Generating secure captions...")
             caption_clips = []
             for s in segments:
                 txt_str = s['text'].strip().upper()
                 duration = s['end'] - s['start']
                 if duration <= 0: continue
                 
-                # Image-based secure clip
-                txt_img = make_text_frame(txt_str, (W_target, 300), caption_color)
-                txt_clip = VideoClip(lambda t: txt_img, duration=duration).set_start(s['start']).set_position(('center', H_target * 0.75))
+                # ImageClip handles RGBA correctly when transparent=True
+                txt_arr = make_text_frame_image(txt_str, (W_target, 300), caption_color)
+                txt_clip = ImageClip(txt_arr, transparent=True).set_start(s['start']).set_duration(duration).set_position(('center', H_target * 0.75))
                 caption_clips.append(txt_clip)
 
             final_video = CompositeVideoClip([portrait_video] + caption_clips, size=(W_target, H_target))
@@ -148,25 +153,29 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
             try: os.remove(temp_audio_path)
             except: pass
 
-# --- [3. APP LAYOUT] ---
-st.markdown("<h1 style='text-align: center;'>🎬 AI AUTO-SHORTS EDITOR</h1>", unsafe_allow_html=True)
+# --- [3. PROFESSIONAL LAYOUT] ---
+st.markdown("<h1 style='text-align: center;'>AI AUTO-SHORTS EDITOR</h1>", unsafe_allow_html=True)
+st.markdown("<p class='description-text'>Transform landscape footage into professional portrait content using automated face tracking and intelligent captioning.</p>", unsafe_allow_html=True)
 st.divider()
 
 col_left, col_right = st.columns([1, 1], gap="large")
 
 with col_left:
-    st.markdown("### 📥 Video Input")
-    video_file = st.file_uploader("Upload your footage", type=["mp4", "mov", "avi"])
+    st.markdown("### Video Input")
+    video_file = st.file_uploader("Upload video file", type=["mp4", "mov", "avi"])
     if video_file: st.video(video_file)
 
 with col_right:
-    st.markdown("### ⚙️ Configurations")
+    st.markdown("### Configurations")
     lang_selection = st.selectbox("Speech Language", ["English (en)", "Urdu (ur)", "Hindi (hi)", "Arabic (ar)"])
     lang_code = lang_selection.split('(')[1].strip(')')
-    cap_color = st.color_picker("Caption Color", "#FFFF00")
+    
+    # Message for color selection
+    st.write("Select color for video caption")
+    cap_color = st.color_picker("", "#FFFF00", label_visibility="collapsed")
     
     if video_file is not None:
-        if st.button("🚀 START TRANSFORMATION"):
+        if st.button("START TRANSFORMATION"):
             status_area = st.empty()
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_in:
                 tmp_in.write(video_file.read())
@@ -175,9 +184,9 @@ with col_right:
             output_name = f"Short_{uuid.uuid4().hex[:6]}.mp4"
             try:
                 process_video_pipeline(tmp_in_path, output_name, lang_code, cap_color, status_area)
-                st.success("✨ Success! Video is Ready.")
+                st.success("Process completed successfully.")
                 with open(output_name, "rb") as f:
-                    st.download_button(label="📥 DOWNLOAD FINAL SHORT", data=f, file_name=output_name, mime="video/mp4")
+                    st.download_button(label="DOWNLOAD PROPORTIONAL SHORT", data=f, file_name=output_name, mime="video/mp4")
                 os.remove(tmp_in_path)
             except Exception as e: 
-                st.error(f"Error: {e}")
+                st.error(f"Error encountered: {e}")
