@@ -1,7 +1,5 @@
-oviepy
-numpy
-watchdog
+streamlit
+moviepy
 openai-whisper
-tqdm
-opencv-python # Or mediapipe, but OpenCV is often easier for simple face tracking
-# You will also need to install ImageMagick separately on your OS (e.g., via apt, brew, or exe installer)
+opencv-python-headless
+numpy
