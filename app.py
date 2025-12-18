@@ -10,40 +10,48 @@ import textwrap
 from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
 from PIL import Image, ImageDraw, ImageFont
 
-# --- [1. PROFESSIONAL UI & CONTRAST FIX] ---
+# --- [1. PROFESSIONAL UI - NO EMOJIS & HIGH CONTRAST] ---
 st.set_page_config(page_title="AI Video Editor Pro", layout="wide")
 
 st.markdown("""
     <style>
+    /* Dark Theme Base */
     .stApp { background-color: #000000; }
-    h1, h2, h3, h4, p, span, label, .stMarkdown { color: #ffffff !important; font-family: 'Segoe UI', sans-serif; }
+    h1, h2, h3, h4, p, span, label, .stMarkdown { 
+        color: #ffffff !important; 
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; 
+    }
     
     .description-text {
         text-align: center;
-        color: #aaaaaa !important;
+        color: #999999 !important;
         font-size: 1.1rem;
         margin-bottom: 2rem;
     }
 
-    /* FILE UPLOADER CONTRAST FIX */
-    .stFileUploader section { 
-        background-color: #0e1117 !important; 
-        border: 1px solid #1e1e1e !important; 
-        border-radius: 12px; 
-    }
-    /* Drag and drop text color change for visibility */
-    .stFileUploader div[data-testid="stFileUploadDropzone"] div {
-        color: #007BFF !important; /* Blue color for instructions */
-        font-weight: 500;
+    /* UPLOADER TEXT COLOR FIX (White to Blue/Dark) */
+    div[data-testid="stFileUploader"] {
+        background-color: #0e1117;
+        border: 1px solid #1e1e1e;
+        border-radius: 12px;
+        padding: 10px;
     }
     
+    /* Target "Drag and drop file here" and "Limit..." text */
+    div[data-testid="stFileUploadDropzone"] div {
+        color: #007BFF !important; /* Making it bright blue for visibility */
+        font-weight: 600 !important;
+    }
+
+    /* Browse Files Button */
     div[data-testid="stFileUploader"] button {
         background-color: #007BFF !important;
         color: white !important;
-        border: none !important;
         border-radius: 8px !important;
+        border: none !important;
     }
 
+    /* Start/Download Buttons */
     .stButton>button, .stDownloadButton>button {
         width: 100%; 
         border-radius: 10px; 
@@ -52,36 +60,36 @@ st.markdown("""
         color: #ffffff !important; 
         font-weight: bold !important; 
         border: none !important;
+        letter-spacing: 0.5px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- [2. INTELLIGENT CAPTION MAKER (Word Wrap Fix)] ---
-def make_text_frame_image(text, size, color):
-    # W_target width par text ko wrap karna taaki sides se cut na ho
-    wrapper = textwrap.TextWrapper(width=20) # 20 characters ke baad line change
+# --- [2. CAPTION LOGIC - WORD WRAP TO PREVENT SIDE CUTTING] ---
+def make_caption_frame(text, size, color):
+    # Max 18 characters per line taaki sides se na katay
+    wrapper = textwrap.TextWrapper(width=18) 
     lines = wrapper.wrap(text=text)
     
     img = Image.new('RGBA', size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 70)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 75)
     except:
         font = ImageFont.load_default()
 
-    # Multiple lines ko draw karna
-    y_text = 0
+    y_pos = 0
     for line in lines:
         w, h = draw.textbbox((0, 0), line, font=font)[2:]
         x = (size[0] - w) // 2
-        # Shadow/Outline
+        # Stroke/Outline for readability
         for o in [-3, 3]:
             for oy in [-3, 3]:
-                draw.text((x+o, y_text+oy), line, font=font, fill="black")
-        # Main Text
-        draw.text((x, y_text), line, font=font, fill=color)
-        y_text += h + 10 # Line spacing
+                draw.text((x+o, y_pos+oy), line, font=font, fill="black")
+        # Main text
+        draw.text((x, y_pos), line, font=font, fill=color)
+        y_pos += h + 15 # Line spacing
         
     return np.array(img)
 
@@ -109,14 +117,14 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
             W_target, H_target = 1080, 1920
             target_crop_w = int(H_orig * (9/16))
             
-            status_container.info("Status: Analyzing audio...")
+            status_container.info("System Status: Processing audio transcription...")
             if clip.audio:
                 clip.audio.write_audiofile(temp_audio_path, logger=None)
                 result = whisper_model.transcribe(temp_audio_path, language=target_lang)
                 segments = result['segments']
             else: segments = []
 
-            status_container.info("Status: Centering content...")
+            status_container.info("System Status: Aligning subject to portrait frame...")
             face_buffer = collections.deque(maxlen=25)
 
             def frame_processor(get_frame, t):
@@ -132,16 +140,15 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
 
             portrait_video = clip.fl(frame_processor)
 
-            status_container.info("Status: Rendering professional captions...")
+            status_container.info("System Status: Rendering multi-line captions...")
             caption_clips = []
             for s in segments:
                 txt_str = s['text'].strip().upper()
                 duration = s['end'] - s['start']
                 if duration <= 0: continue
                 
-                # Height increase ki taaki multiple lines fit aa sakein
-                txt_arr = make_text_frame_image(txt_str, (W_target, 500), caption_color)
-                txt_clip = ImageClip(txt_arr, transparent=True).set_start(s['start']).set_duration(duration).set_position(('center', H_target * 0.70))
+                txt_arr = make_caption_frame(txt_str, (W_target, 500), caption_color)
+                txt_clip = ImageClip(txt_arr, transparent=True).set_start(s['start']).set_duration(duration).set_position(('center', H_target * 0.72))
                 caption_clips.append(txt_clip)
 
             final_video = CompositeVideoClip([portrait_video] + caption_clips, size=(W_target, H_target))
@@ -154,7 +161,7 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
             try: os.remove(temp_audio_path)
             except: pass
 
-# --- [3. MAIN APP INTERFACE] ---
+# --- [3. MAIN APPLICATION] ---
 st.markdown("<h1 style='text-align: center;'>AI AUTO-SHORTS EDITOR</h1>", unsafe_allow_html=True)
 st.markdown("<p class='description-text'>Professional landscape-to-portrait transformation with automated face tracking and intelligent captioning.</p>", unsafe_allow_html=True)
 st.divider()
@@ -184,9 +191,9 @@ with col_right:
             output_name = f"Short_{uuid.uuid4().hex[:6]}.mp4"
             try:
                 process_video_pipeline(tmp_in_path, output_name, lang_code, cap_color, status_area)
-                st.success("Transformation complete.")
+                st.success("Process finalized. File is ready for download.")
                 with open(output_name, "rb") as f:
                     st.download_button(label="DOWNLOAD PROPORTIONAL SHORT", data=f, file_name=output_name, mime="video/mp4")
                 os.remove(tmp_in_path)
             except Exception as e: 
-                st.error(f"Processing error: {e}")
+                st.error(f"Execution Error: {e}")
