@@ -10,12 +10,11 @@ import textwrap
 from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
 from PIL import Image, ImageDraw, ImageFont
 
-# --- [1. PROFESSIONAL UI - NO EMOJIS & HIGH CONTRAST] ---
+# --- [1. PROFESSIONAL UI - HIGH CONTRAST] ---
 st.set_page_config(page_title="AI Video Editor Pro", layout="wide")
 
 st.markdown("""
     <style>
-    /* Dark Theme Base */
     .stApp { background-color: #000000; }
     h1, h2, h3, h4, p, span, label, .stMarkdown { 
         color: #ffffff !important; 
@@ -29,7 +28,6 @@ st.markdown("""
         margin-bottom: 2rem;
     }
 
-    /* UPLOADER TEXT COLOR FIX (White to Blue/Dark) */
     div[data-testid="stFileUploader"] {
         background-color: #0e1117;
         border: 1px solid #1e1e1e;
@@ -37,21 +35,17 @@ st.markdown("""
         padding: 10px;
     }
     
-    /* Target "Drag and drop file here" and "Limit..." text */
     div[data-testid="stFileUploadDropzone"] div {
-        color: #007BFF !important; /* Making it bright blue for visibility */
+        color: #007BFF !important; 
         font-weight: 600 !important;
     }
 
-    /* Browse Files Button */
     div[data-testid="stFileUploader"] button {
         background-color: #007BFF !important;
         color: white !important;
         border-radius: 8px !important;
-        border: none !important;
     }
 
-    /* Start/Download Buttons */
     .stButton>button, .stDownloadButton>button {
         width: 100%; 
         border-radius: 10px; 
@@ -60,20 +54,19 @@ st.markdown("""
         color: #ffffff !important; 
         font-weight: bold !important; 
         border: none !important;
-        letter-spacing: 0.5px;
     }
+
+    /* Checkbox Styling */
+    .stCheckbox label { color: #007BFF !important; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- [2. CAPTION LOGIC - WORD WRAP TO PREVENT SIDE CUTTING] ---
+# --- [2. LOGIC FUNCTIONS] ---
 def make_caption_frame(text, size, color):
-    # Max 18 characters per line taaki sides se na katay
     wrapper = textwrap.TextWrapper(width=18) 
     lines = wrapper.wrap(text=text)
-    
     img = Image.new('RGBA', size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    
     try:
         font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 75)
     except:
@@ -83,14 +76,11 @@ def make_caption_frame(text, size, color):
     for line in lines:
         w, h = draw.textbbox((0, 0), line, font=font)[2:]
         x = (size[0] - w) // 2
-        # Stroke/Outline for readability
         for o in [-3, 3]:
             for oy in [-3, 3]:
                 draw.text((x+o, y_pos+oy), line, font=font, fill="black")
-        # Main text
         draw.text((x, y_pos), line, font=font, fill=color)
-        y_pos += h + 15 # Line spacing
-        
+        y_pos += h + 15
     return np.array(img)
 
 @st.cache_resource
@@ -105,24 +95,30 @@ def get_stable_center(faces, W_orig, buffer):
     buffer.append(target_x)
     return sum(buffer) / len(buffer)
 
-def process_video_pipeline(input_path, output_path, target_lang, caption_color, status_container):
+def process_video_pipeline(input_path, output_path, target_lang, caption_color, status_container, add_captions):
     FACE_CASCADE = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    whisper_model = load_whisper_model()
     unique_id = str(uuid.uuid4())[:8]
     temp_audio_path = f"temp_audio_{unique_id}.mp3"
-
+    
     try:
         with VideoFileClip(input_path) as clip:
             W_orig, H_orig = clip.size
             W_target, H_target = 1080, 1920
             target_crop_w = int(H_orig * (9/16))
             
-            status_container.info("System Status: Processing audio transcription...")
-            if clip.audio:
+            segments = []
+            # Only transcribe if user wants captions AND audio exists
+            if add_captions and clip.audio:
+                status_container.info("System Status: Analyzing audio for speech...")
                 clip.audio.write_audiofile(temp_audio_path, logger=None)
+                whisper_model = load_whisper_model()
                 result = whisper_model.transcribe(temp_audio_path, language=target_lang)
-                segments = result['segments']
-            else: segments = []
+                
+                # FIX: Ghost caption prevention (Only if speech is detected)
+                if result['text'].strip():
+                    segments = result['segments']
+                else:
+                    status_container.warning("System Status: No clear speech detected. Skipping captions.")
 
             status_container.info("System Status: Aligning subject to portrait frame...")
             face_buffer = collections.deque(maxlen=25)
@@ -140,16 +136,19 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
 
             portrait_video = clip.fl(frame_processor)
 
-            status_container.info("System Status: Rendering multi-line captions...")
             caption_clips = []
-            for s in segments:
-                txt_str = s['text'].strip().upper()
-                duration = s['end'] - s['start']
-                if duration <= 0: continue
-                
-                txt_arr = make_caption_frame(txt_str, (W_target, 500), caption_color)
-                txt_clip = ImageClip(txt_arr, transparent=True).set_start(s['start']).set_duration(duration).set_position(('center', H_target * 0.72))
-                caption_clips.append(txt_clip)
+            if segments:
+                status_container.info("System Status: Rendering multi-line captions...")
+                for s in segments:
+                    txt_str = s['text'].strip().upper()
+                    # Final filter for very short/empty ghost text
+                    if not txt_str or len(txt_str) < 2: continue 
+                    
+                    duration = s['end'] - s['start']
+                    if duration <= 0: continue
+                    txt_arr = make_caption_frame(txt_str, (W_target, 500), caption_color)
+                    txt_clip = ImageClip(txt_arr, transparent=True).set_start(s['start']).set_duration(duration).set_position(('center', H_target * 0.72))
+                    caption_clips.append(txt_clip)
 
             final_video = CompositeVideoClip([portrait_video] + caption_clips, size=(W_target, H_target))
             final_video.write_videofile(output_path, codec="libx264", audio_codec="aac", fps=24, logger=None)
@@ -163,7 +162,7 @@ def process_video_pipeline(input_path, output_path, target_lang, caption_color, 
 
 # --- [3. MAIN APPLICATION] ---
 st.markdown("<h1 style='text-align: center;'>AI AUTO-SHORTS EDITOR</h1>", unsafe_allow_html=True)
-st.markdown("<p class='description-text'>Professional landscape-to-portrait transformation with automated face tracking and intelligent captioning.</p>", unsafe_allow_html=True)
+st.markdown("<p class='description-text'>Professional landscape-to-portrait transformation with automated face tracking.</p>", unsafe_allow_html=True)
 st.divider()
 
 col_left, col_right = st.columns([1, 1], gap="large")
@@ -175,12 +174,23 @@ with col_left:
 
 with col_right:
     st.markdown("### Configurations")
-    lang_selection = st.selectbox("Speech Language", ["English (en)", "Urdu (ur)", "Hindi (hi)", "Arabic (ar)"])
-    lang_code = lang_selection.split('(')[1].strip(')')
     
-    st.write("Select color for video caption")
-    cap_color = st.color_picker("", "#FFFF00", label_visibility="collapsed")
+    # Clean Language List (No codes shown)
+    lang_map = {"English": "en", "Urdu": "ur", "Hindi": "hi", "Arabic": "ar"}
+    lang_selection = st.selectbox("Speech Language", list(lang_map.keys()))
+    lang_code = lang_map[lang_selection]
     
+    # Toggle Feature for Captions
+    st.markdown("---")
+    enable_captions = st.checkbox("Generate Automated Captions", value=True)
+    
+    if enable_captions:
+        st.write("Select caption color")
+        cap_color = st.color_picker("", "#FFFF00", label_visibility="collapsed")
+    else:
+        cap_color = "#FFFF00" # Default
+        st.info("Captions are disabled. Only face tracking will be applied.")
+
     if video_file is not None:
         if st.button("START TRANSFORMATION"):
             status_area = st.empty()
@@ -190,7 +200,7 @@ with col_right:
 
             output_name = f"Short_{uuid.uuid4().hex[:6]}.mp4"
             try:
-                process_video_pipeline(tmp_in_path, output_name, lang_code, cap_color, status_area)
+                process_video_pipeline(tmp_in_path, output_name, lang_code, cap_color, status_area, enable_captions)
                 st.success("Process finalized. File is ready for download.")
                 with open(output_name, "rb") as f:
                     st.download_button(label="DOWNLOAD PROPORTIONAL SHORT", data=f, file_name=output_name, mime="video/mp4")
