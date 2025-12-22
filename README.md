@@ -1,5 +1,3 @@
-
-
 # 🎬 AI Auto-Shorts Editor
 
 **Landscape-to-Portrait Video Transformation Pipeline**
